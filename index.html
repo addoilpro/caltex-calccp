@@ -145,13 +145,12 @@
 
     <script>
         // 數據源
-        const RAW_PRICE_URL = "https://www.consumer.org.hk/pricewatch/oilwatch/opendata/oilprice_en.csv";
-        // 加入時間戳避免快取
-        const PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(RAW_PRICE_URL)}&timestamp=${Date.now()}`;
+        // 更新為你提供的 Google Sheet CSV 連結作為油價來源
+        const PRICE_CSV_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTWqLgHf9e8GyoDwCDxY15GY19TvKS0mIo4MXlaYb6pdvJrGm3wxgYsiORXX3vkgWuWjUasZ17X_Cqa/pub?gid=1276961055&single=true&output=csv&t=${Date.now()}`;
         const PROMO_CSV_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTWqLgHf9e8GyoDwCDxY15GY19TvKS0mIo4MXlaYb6pdvJrGm3wxgYsiORXX3vkgWuWjUasZ17X_Cqa/pub?gid=1529186181&single=true&output=csv&t=${Date.now()}`;
 
         let promoRules = [];
-        let gasPrices = { "super": 33.99, "regular": 32.19 }; // 備用值，若抓取失敗將使用消委會最新截圖價格
+        let gasPrices = { "super": 33.99, "regular": 32.19 }; // 備用預設值
         let state = { day: new Date().getDay() || 7, fuel: 'super' };
 
         function parseCSV(text) {
@@ -181,32 +180,29 @@
             try {
                 // 並行獲取數據
                 const [pRes, rRes] = await Promise.all([
-                    fetch(PROXY_URL).then(res => res.ok ? res.text() : null).catch(() => null),
+                    fetch(PRICE_CSV_URL).then(res => res.text()),
                     fetch(PROMO_CSV_URL).then(res => res.text())
                 ]);
                 
-                // 1. 處理牌價
-                if (pRes) {
-                    const pData = parseCSV(pRes);
-                    pData.forEach((row, idx) => {
-                        if (idx === 0 || row.length < 3) return;
-                        const product = (row[0] || "").toLowerCase();
-                        const brand = (row[1] || "").toLowerCase();
-                        const priceStr = (row[2] || "").replace(/[^\d.]/g, "");
-                        const price = parseFloat(priceStr);
+                // 1. 處理油價 (從 Google Sheet)
+                const pData = parseCSV(pRes);
+                pData.forEach((row, idx) => {
+                    if (idx === 0 || row.length < 3) return;
+                    // 假設 Sheet 結構與消委會 CSV 相似：[產品, 公司, 價格]
+                    const product = (row[0] || "").toLowerCase();
+                    const brand = (row[1] || "").toLowerCase();
+                    const priceStr = (row[2] || "").replace(/[^\d.]/g, "");
+                    const price = parseFloat(priceStr);
 
-                        if (brand.includes('caltex') && !isNaN(price)) {
-                            if (product.includes('premium')) {
-                                gasPrices['super'] = price;
-                            } else if (product.includes('standard')) {
-                                gasPrices['regular'] = price;
-                            }
+                    if (brand.includes('caltex') && !isNaN(price)) {
+                        if (product.includes('premium')) {
+                            gasPrices['super'] = price;
+                        } else if (product.includes('standard')) {
+                            gasPrices['regular'] = price;
                         }
-                    });
-                    document.getElementById('sync-status').innerText = `已從消委會更新 (${new Date().toLocaleTimeString()})`;
-                } else {
-                    document.getElementById('sync-status').innerText = "數據同步中（暫用預設價格）";
-                }
+                    }
+                });
+                document.getElementById('sync-status').innerText = `數據已從試算表更新 (${new Date().toLocaleTimeString()})`;
 
                 // 2. 處理優惠規則
                 const rData = parseCSV(rRes);
@@ -227,7 +223,7 @@
                 updateUI();
             } catch (e) {
                 console.error("Init Error:", e);
-                document.getElementById('sync-status').innerText = "數據連線不穩定";
+                document.getElementById('sync-status').innerText = "數據同步失敗，正使用快取價格";
                 updateUI();
             } finally {
                 document.getElementById('loading').style.display = 'none';
